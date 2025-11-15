@@ -1,0 +1,127 @@
+{
+  "timestamp": "2025-11-15T15:28:34.182567",
+  "total_texts": 20,
+  "model": "MNB",
+  "results": [
+    {
+      "text": "Estou completamente irritado com essa situação! Não aguento mais! ??",
+      "emotion": "AUSENTE",
+      "feeling": "Negativo",
+      "confidence": 0.9545332689479482
+    },
+    {
+      "text": "Finalmente terminei o projeto! Estou muito feliz com o resultado! ??",
+      "emotion": "AUSENTE",
+      "feeling": "Negativo",
+      "confidence": 0.7376390766830114
+    },
+    {
+      "text": "Estou tão preocupado com a minha saúde. Não sei o que fazer. ??",
+      "emotion": "AUSENTE",
+      "feeling": "Negativo",
+      "confidence": 0.6450348213657368
+    },
+    {
+      "text": "Parece que tudo está dando errado ultimamente, estou tão triste. ??",
+      "emotion": "AUSENTE",
+      "feeling": "Negativo;positivo",
+      "confidence": 0.8881488191903196
+    },
+    {
+      "text": "Confio plenamente nas minhas habilidades e sei que vou conseguir! ??",
+      "emotion": "AUSENTE",
+      "feeling": "Negativo",
+      "confidence": 0.7764231970940679
+    },
+    {
+      "text": "Amei a surpresa que meu amigo me preparou! Foi tão emocionante! ??",
+      "emotion": "AUSENTE",
+      "feeling": "Negativo",
+      "confidence": 0.7286665308018854
+    },
+    {
+      "text": "Nada parece importar mais. Não sei se me sinto triste ou vazio. ??",
+      "emotion": "AUSENTE",
+      "feeling": "Neutro",
+      "confidence": 0.0
+    },
+    {
+      "text": "Cada vez que vejo essa situação, mais raiva eu sinto. Não é possível! ??",
+      "emotion": "AUSENTE",
+      "feeling": "Negativo",
+      "confidence": 0.9994043040086584
+    },
+    {
+      "text": "Estou tão feliz por ter conhecido pessoas incríveis durante essa jornada. ??",
+      "emotion": "AUSENTE",
+      "feeling": "Negativo",
+      "confidence": 0.8941182586719822
+    },
+    {
+      "text": "Não sei o que fazer, estou com tanto medo do que pode acontecer. ??",
+      "emotion": "AUSENTE",
+      "feeling": "Negativo",
+      "confidence": 0.9979504591477454
+    },
+    {
+      "text": "Hoje foi um daqueles dias perfeitos. Tudo correu muito bem. ??",
+      "emotion": "AUSENTE",
+      "feeling": "Negativo",
+      "confidence": 0.962894102821408
+    },
+    {
+      "text": "Parece que o mundo está desabando. Como tudo foi parar aqui? ??",
+      "emotion": "AUSENTE",
+      "feeling": "Neutro",
+      "confidence": 0.0
+    },
+    {
+      "text": "Confiar nas pessoas sempre me trouxe paz e felicidade. Sempre vou acreditar. ??",
+      "emotion": "AUSENTE",
+      "feeling": "Negativo;positivo",
+      "confidence": 0.9988597840539464
+    },
+    {
+      "text": "Nada de novo por aqui. Tudo continua igual, sem grandes mudanças. ??",
+      "emotion": "AUSENTE",
+      "feeling": "Neutro",
+      "confidence": 0.6470143882763572
+    },
+    {
+      "text": "Estou tão triste que não sei mais o que fazer da minha vida. ??",
+      "emotion": "AUSENTE",
+      "feeling": "Negativo",
+      "confidence": 0.972134772209689
+    },
+    {
+      "text": "A raiva que sinto não tem explicação. Isso precisa acabar! ??",
+      "emotion": "AUSENTE",
+      "feeling": "Negativo",
+      "confidence": 0.9633764510424656
+    },
+    {
+      "text": "Hoje, meu coração está cheio de amor por tudo e todos. ??",
+      "emotion": "AUSENTE",
+      "feeling": "Negativo",
+      "confidence": 0.523248450016418
+    },
+    {
+      "text": "Eu sabia que podia confiar em você. Agora tudo está certo. ??",
+      "emotion": "AUSENTE",
+      "feeling": "Negativo",
+      "confidence": 0.8876419004742638
+    },
+    {
+      "text": "Estou apenas tentando entender o que aconteceu. Eu me sinto tão ausente. ??",
+      "emotion": "AUSENTE",
+      "feeling": "Negativo;positivo",
+      "confidence": 0.9676691359670284
+    },
+    {
+      "text": "Estou com tanto medo de enfrentar o futuro sozinho. ??",
+      "emotion": "AUSENTE",
+      "feeling": "Negativo",
+      "confidence": 0.8668560608790727
+    }
+  ]
+}
