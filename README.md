@@ -30,12 +30,14 @@ O projeto foi desenvolvido como parte do **Trabalho de Conclusão de Curso (TCC)
 - **Python 3.10+**
 - **pip** atualizado (`python -m pip install --upgrade pip`)
 - **Virtualenv** opcional, mas recomendado (`python -m venv .venv`)
+- **Git LFS** instalado (necessário para baixar os modelos `.pt`)
 - Navegador moderno (Chrome/Firefox/Edge)
 
 ### 1. Clonar o projeto
 ```bash
 git clone https://github.com/<usuario>/EmotionScan.git
 cd EmotionScan
+git lfs install    # garante que os arquivos .pt sejam baixados
 ```
 
 ### 2. Configurar ambiente Python
@@ -46,12 +48,12 @@ source .venv/bin/activate        # macOS/Linux
 .venv\Scripts\activate          # Windows
 
 # instalar dependências do backend
-pip install -r python/requirements.txt
+pip install -r app/api/requirements.txt
 ```
 
 ### 3. Executar a API (Flask)
 ```bash
-cd python
+cd app/api
 python api_server.py
 ```
 A API sobe em `http://localhost:5000`. Os modelos são carregados na inicialização e os endpoints principais são:
@@ -60,7 +62,7 @@ A API sobe em `http://localhost:5000`. Os modelos são carregados na inicializa�
 
 ### 4. Abrir a interface
 1. Volte ao diretório raiz do projeto.
-2. Abra o arquivo `index.html` diretamente no navegador (duplo clique ou `open index.html`).
+2. Abra o arquivo `app/frontend/index.html` diretamente no navegador (duplo clique ou `open app/frontend/index.html`).
 3. A interface consome a API local em `http://localhost:5000`.
 
 ### 5. Classificar textos
@@ -71,6 +73,6 @@ A API sobe em `http://localhost:5000`. Os modelos são carregados na inicializa�
 5. Após a predição, baixe o CSV com os resultados pelo botão **Baixar Resultados (.csv)**.
 
 ### 6. Observações
-- Logs de predição são salvos em `python/emotion_results_<timestamp>.json`.
-- Métricas exibidas podem ser ajustadas editando `python/model_metrics.json`.
-- Para atualizar os modelos, substitua os arquivos de pesos na pasta correspondente (`bertimbau-mlp-*`).
+- Logs de predição são salvos via API em `app/api/emotion_results_<timestamp>.json`.
+- Métricas exibidas podem ser ajustadas editando os scripts em `app/api` (por exemplo `analyze_model_results.py`).
+- Os pesos dos modelos ficam em `app/models/bertimbau-mlp-*` e são distribuídos via Git LFS; para atualizá-los, substitua os arquivos `.pt` nessas pastas.
