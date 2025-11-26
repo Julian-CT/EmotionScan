@@ -60,39 +60,6 @@ def is_lfs_pointer(filepath):
     except:
         return False
 
-def convert_google_drive_link(share_url):
-    """Convert Google Drive share link to direct download link"""
-    # Google Drive share links come in different formats:
-    # Format 1: https://drive.google.com/file/d/FILE_ID/view?usp=sharing
-    # Format 2: https://drive.google.com/open?id=FILE_ID
-    # Format 3: https://drive.google.com/uc?id=FILE_ID (already direct)
-    
-    import re
-    
-    # Extract file ID from various Google Drive URL formats
-    file_id = None
-    
-    # Try to extract from /d/FILE_ID/ pattern
-    match = re.search(r'/d/([a-zA-Z0-9_-]+)', share_url)
-    if match:
-        file_id = match.group(1)
-    else:
-        # Try to extract from ?id=FILE_ID pattern
-        match = re.search(r'[?&]id=([a-zA-Z0-9_-]+)', share_url)
-        if match:
-            file_id = match.group(1)
-    
-    if file_id:
-        # Convert to direct download URL
-        # For large files, Google Drive may show a virus scan warning
-        # Use uc?export=download&id= format, and handle virus scan confirmation
-        direct_url = f"https://drive.google.com/uc?export=download&id={file_id}"
-        return direct_url
-    else:
-        # If we can't extract ID, return original URL (might already be direct)
-        print(f"   ⚠️  Could not extract file ID from Google Drive URL, using as-is")
-        return share_url
-
 def download_from_git_lfs(model_path, model_name):
     """Try to download model from Git LFS using git lfs pull and store in volume"""
     if not is_lfs_pointer(model_path):
@@ -255,65 +222,44 @@ def download_model_if_needed(model_path, model_url, model_name):
         try:
             os.makedirs(os.path.dirname(model_path), exist_ok=True)
             
-            # Convert Google Drive share link to direct download link if needed
-            download_url = model_url
-            if "drive.google.com" in model_url:
-                print(f"   Detected Google Drive link, converting to direct download...")
-                download_url = convert_google_drive_link(model_url)
-                print(f"   Using direct download URL")
-            
-            # For Google Drive, handle virus scan warning for large files
-            session = requests.Session()
-            response = session.get(download_url, stream=True, timeout=600, allow_redirects=True)
-            
-            # Check if Google Drive is showing a virus scan warning page
-            # Large files (>100MB) trigger a warning that needs confirmation
-            if 'virus scan warning' in response.text.lower() or 'download anyway' in response.text.lower():
-                print(f"   ⚠️  Google Drive virus scan warning detected, attempting to bypass...")
-                # Extract the confirmation link from the warning page
-                import re
-                confirm_match = re.search(r'href="(/uc\?export=download[^"]*)"', response.text)
-                if confirm_match:
-                    confirm_url = "https://drive.google.com" + confirm_match.group(1)
-                    print(f"   Using confirmation link...")
-                    response = session.get(confirm_url, stream=True, timeout=600, allow_redirects=True)
-                else:
-                    # Try alternative method: use confirm parameter
-                    if 'id=' in download_url:
-                        file_id = re.search(r'id=([^&]+)', download_url).group(1)
-                        confirm_url = f"https://drive.google.com/uc?export=download&confirm=t&id={file_id}"
-                        print(f"   Trying alternative download method...")
-                        response = session.get(confirm_url, stream=True, timeout=600, allow_redirects=True)
-            
-            response.raise_for_status()
-            
-            # Check if we got HTML instead of binary (still showing warning page)
-            content_type = response.headers.get('content-type', '').lower()
-            if 'text/html' in content_type and len(response.content) < 10000:
-                # Likely still a warning page, try one more time with confirm=t
-                if 'drive.google.com' in download_url and 'id=' in download_url:
-                    file_id = re.search(r'id=([^&]+)', download_url).group(1)
-                    final_url = f"https://drive.google.com/uc?export=download&confirm=t&id={file_id}"
-                    print(f"   Retrying with confirmation parameter...")
-                    response = session.get(final_url, stream=True, timeout=600, allow_redirects=True)
-                    response.raise_for_status()
-            
-            total_size = int(response.headers.get('content-length', 0))
-            downloaded = 0
-            
-            with open(model_path, 'wb') as f:
-                for chunk in response.iter_content(chunk_size=8192):
-                    if chunk:
-                        f.write(chunk)
-                        downloaded += len(chunk)
-                        if total_size > 0:
-                            percent = (downloaded / total_size) * 100
-                            print(f"\r   Progress: {percent:.1f}% ({downloaded / (1024*1024):.1f} MB)", end='', flush=True)
-                        else:
-                            print(f"\r   Progress: {downloaded / (1024*1024):.1f} MB downloaded", end='', flush=True)
-            
-            print(f"\n✅ {model_name} downloaded successfully!")
-            return True
+            # Priority 1: GitHub Releases (most reliable - direct downloads, no virus scan warnings)
+            if "github.com" in model_url and "/releases/download/" in model_url:
+                print(f"   Detected GitHub Releases link - using direct download...")
+                session = requests.Session()
+                # GitHub Releases URLs are already direct download URLs - no conversion needed
+                response = session.get(model_url, stream=True, timeout=600, allow_redirects=True)
+                response.raise_for_status()
+                
+                # GitHub Releases always returns binary files, no HTML checks needed
+                total_size = int(response.headers.get('content-length', 0))
+                downloaded = 0
+                
+                print(f"   Starting download (expected size: {total_size / (1024*1024):.1f} MB if available)...")
+                
+                with open(model_path, 'wb') as f:
+                    for chunk in response.iter_content(chunk_size=8192):
+                        if chunk:
+                            f.write(chunk)
+                            downloaded += len(chunk)
+                            if total_size > 0:
+                                percent = (downloaded / total_size) * 100
+                                print(f"\r   Progress: {percent:.1f}% ({downloaded / (1024*1024):.1f} MB)", end='', flush=True)
+                            else:
+                                print(f"\r   Progress: {downloaded / (1024*1024):.1f} MB downloaded", end='', flush=True)
+                
+                # Verify download was successful
+                final_size = os.path.getsize(model_path)
+                if final_size < 100000:  # Less than 100KB is suspicious
+                    os.remove(model_path)
+                    raise ValueError(f"Downloaded file too small ({final_size} bytes). Expected ~400MB.")
+                
+                print(f"\n✅ {model_name} downloaded successfully from GitHub Releases! ({final_size / (1024*1024):.1f} MB)")
+                return True
+            else:
+                # Not a GitHub Releases URL
+                raise ValueError(f"Only GitHub Releases URLs are supported. "
+                               f"Expected format: https://github.com/OWNER/REPO/releases/download/TAG/FILENAME\n"
+                               f"Got: {model_url}")
         except Exception as e:
             print(f"❌ Error downloading {model_name}: {e}")
             return False
