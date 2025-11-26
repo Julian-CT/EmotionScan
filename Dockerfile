@@ -27,16 +27,6 @@ RUN mkdir -p /tmp/models/mnb && \
         cp -r models/mnb/* /tmp/models/mnb/ 2>/dev/null || true; \
     fi
 
-# Copy .git directory and .gitattributes (needed for Git LFS)
-# Note: Railway volumes are mounted at runtime, not during build
-# So we'll download models to the volume at runtime instead
-COPY .git/ .git/
-COPY .gitattributes .gitattributes
-
-# Note: We don't run git lfs pull here because:
-# 1. Volumes are only mounted at runtime, not during build
-# 2. Models will be downloaded to the volume when the app starts
-# 3. This avoids authentication issues during build
 
 # Expose port (Railway will set PORT env var)
 EXPOSE 5000
