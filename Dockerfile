@@ -5,14 +5,14 @@ FROM python:3.11-slim
 WORKDIR /app
 
 # Copy requirements first (for better caching)
-COPY requirements.txt .
+COPY app/requirements.txt .
 
 # Install Python dependencies
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
 # Copy the rest of the application
-COPY . .
+COPY app/ .
 
 # Expose port (Railway will set PORT env var)
 EXPOSE 5000
