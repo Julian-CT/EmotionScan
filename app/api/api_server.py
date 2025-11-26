@@ -210,10 +210,35 @@ def download_model_if_needed(model_path, model_url, model_name):
             print(f"   ⚠️  Git LFS failed. Please set {model_name.upper().replace(' ', '_')}_MODEL_URL environment variable")
             return False
     
-    # If file exists and is not a pointer, we're good
+    # If file exists, validate it's actually a valid binary file (not HTML/corrupted)
     if os.path.exists(model_path) and not is_lfs_pointer(model_path):
-        print(f"   ✅ File already exists, skipping download")
-        return True
+        file_size = os.path.getsize(model_path)
+        
+        # Check if file is suspiciously small (likely HTML error page)
+        if file_size < 100000:  # Less than 100KB is suspicious for a 400MB model
+            print(f"   ⚠️  File exists but is too small ({file_size} bytes). Likely corrupted or HTML.")
+            print(f"   Deleting corrupted file and re-downloading...")
+            os.remove(model_path)
+        else:
+            # Check first few bytes to see if it's HTML
+            try:
+                with open(model_path, 'rb') as f:
+                    first_bytes = f.read(100)
+                    # Check if it starts with HTML markers
+                    if first_bytes.startswith(b'<!DOCTYPE') or first_bytes.startswith(b'<html') or first_bytes.startswith(b'<HTML'):
+                        print(f"   ⚠️  File exists but appears to be HTML (corrupted download).")
+                        print(f"   File size: {file_size} bytes")
+                        print(f"   First bytes (hex): {first_bytes[:20].hex()}")
+                        print(f"   Deleting corrupted file and re-downloading...")
+                        os.remove(model_path)
+                    else:
+                        # File looks valid
+                        print(f"   ✅ File already exists and appears valid ({file_size / (1024*1024):.1f} MB), skipping download")
+                        return True
+            except Exception as e:
+                print(f"   ⚠️  Error checking file: {e}. Re-downloading...")
+                if os.path.exists(model_path):
+                    os.remove(model_path)
     
     # Download from URL if provided
     # Check if URL is provided (not empty string) and file doesn't exist
