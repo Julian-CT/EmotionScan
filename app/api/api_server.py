@@ -221,6 +221,11 @@ def download_from_git_lfs(model_path, model_name):
 
 def download_model_if_needed(model_path, model_url, model_name):
     """Download model if it doesn't exist and URL is provided"""
+    print(f"\n🔍 Checking {model_name}...")
+    print(f"   Path: {model_path}")
+    print(f"   Exists: {os.path.exists(model_path)}")
+    print(f"   URL provided: {bool(model_url)}")
+    
     # First, check if it's a Git LFS pointer
     if is_lfs_pointer(model_path):
         print(f"⚠️  {model_name} is a Git LFS pointer")
@@ -240,10 +245,12 @@ def download_model_if_needed(model_path, model_url, model_name):
     
     # If file exists and is not a pointer, we're good
     if os.path.exists(model_path) and not is_lfs_pointer(model_path):
+        print(f"   ✅ File already exists, skipping download")
         return True
     
     # Download from URL if provided
-    if model_url and not os.path.exists(model_path):
+    # Check if URL is provided (not empty string) and file doesn't exist
+    if model_url and model_url.strip() and not os.path.exists(model_path):
         print(f"📥 Downloading {model_name} from {model_url}...")
         try:
             os.makedirs(os.path.dirname(model_path), exist_ok=True)
@@ -311,6 +318,16 @@ def download_model_if_needed(model_path, model_url, model_name):
             print(f"❌ Error downloading {model_name}: {e}")
             return False
     
+    # If we get here, file doesn't exist
+    if not model_url or not model_url.strip():
+        print(f"   ⚠️  No URL provided and file doesn't exist!")
+        print(f"   ⚠️  Set {model_name.upper().replace(' ', '_')}_MODEL_URL environment variable in Railway")
+        print(f"   ⚠️  Current value: '{model_url}' (empty or not set)")
+        return False
+    else:
+        print(f"   ⚠️  File doesn't exist but URL is set. Download should have happened above.")
+        print(f"   ⚠️  This shouldn't happen - check the download logic above.")
+    
     return os.path.exists(model_path) and not is_lfs_pointer(model_path)
 
 # Copy src directories to volume if they don't exist (volume overlay hides build files)
@@ -331,7 +348,21 @@ bert_emotions_path = os.path.join(BERT_EMOTIONS_PATH, "bertimbau_mlp.pt")
 bert_sentiment_path = os.path.join(BERT_SENTIMENT_PATH, "bertimbau_sentiment_best.pt")
 
 # Try Git LFS first, then fallback to URL if provided
-print("Downloading model weights...")
+print("\n" + "="*60)
+print("DOWNLOADING MODEL WEIGHTS")
+print("="*60)
+print(f"BERT_EMOTIONS_MODEL_URL: {'✅ SET' if BERT_EMOTIONS_MODEL_URL and BERT_EMOTIONS_MODEL_URL.strip() else '❌ NOT SET'}")
+if BERT_EMOTIONS_MODEL_URL:
+    print(f"   Value: {BERT_EMOTIONS_MODEL_URL[:50]}..." if len(BERT_EMOTIONS_MODEL_URL) > 50 else f"   Value: {BERT_EMOTIONS_MODEL_URL}")
+print(f"BERT_SENTIMENT_MODEL_URL: {'✅ SET' if BERT_SENTIMENT_MODEL_URL and BERT_SENTIMENT_MODEL_URL.strip() else '❌ NOT SET'}")
+if BERT_SENTIMENT_MODEL_URL:
+    print(f"   Value: {BERT_SENTIMENT_MODEL_URL[:50]}..." if len(BERT_SENTIMENT_MODEL_URL) > 50 else f"   Value: {BERT_SENTIMENT_MODEL_URL}")
+print(f"\nFile check:")
+print(f"   {bert_emotions_path} exists: {os.path.exists(bert_emotions_path)}")
+print(f"   {bert_sentiment_path} exists: {os.path.exists(bert_sentiment_path)}")
+print("="*60 + "\n")
+
+# Download models - this WILL attempt download if URLs are set
 download_model_if_needed(bert_emotions_path, BERT_EMOTIONS_MODEL_URL, "BERTimbau Emoções")
 download_model_if_needed(bert_sentiment_path, BERT_SENTIMENT_MODEL_URL, "BERTimbau Sentimentos")
 
