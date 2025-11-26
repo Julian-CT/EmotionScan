@@ -7,6 +7,8 @@ import pickle
 import re
 import io
 import pandas as pd
+import requests
+import shutil
 from sklearn.feature_extraction.text import CountVectorizer
 from sklearn.naive_bayes import MultinomialNB
 from sklearn.preprocessing import MultiLabelBinarizer
@@ -31,8 +33,9 @@ if os.path.exists('/var/task'):
     # Vercel serverless environment
     BASE_DIR = '/var/task'
 else:
-    # Local development
+    # Local development or Railway
     BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # Paths to model directories
@@ -41,6 +44,177 @@ BERT_EMOTIONS_PATH = os.path.join(MODELS_DIR, "bertimbau-mlp-ai")
 BERT_SENTIMENT_PATH = os.path.join(MODELS_DIR, "bertimbau-mlp-sentiment")
 MNB_MODEL_DIR = os.path.join(MODELS_DIR, "mnb")
 API_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# Model download URLs (set via environment variables)
+BERT_EMOTIONS_MODEL_URL = os.getenv('BERT_EMOTIONS_MODEL_URL', '')
+BERT_SENTIMENT_MODEL_URL = os.getenv('BERT_SENTIMENT_MODEL_URL', '')
+
+def is_lfs_pointer(filepath):
+    """Check if file is a Git LFS pointer instead of actual binary"""
+    if not os.path.exists(filepath):
+        return False
+    try:
+        with open(filepath, 'r', encoding='utf-8') as f:
+            first_line = f.readline()
+            return first_line.startswith("version https://git-lfs.github.com/spec/v1")
+    except:
+        return False
+
+def download_from_git_lfs(model_path, model_name):
+    """Try to download model from Git LFS using git lfs pull and store in volume"""
+    if not is_lfs_pointer(model_path):
+        return False  # File is already a binary, not a pointer
+    
+    print(f"📥 Detected Git LFS pointer for {model_name}, trying to fetch from Git LFS...")
+    print(f"   Target location: {model_path}")
+    print(f"   This will be stored in Railway volume at /app/models")
+    try:
+        import subprocess
+        
+        # Check if .git directory exists
+        git_dir = os.path.join(BASE_DIR, '.git')
+        if not os.path.exists(git_dir):
+            print(f"⚠️  .git directory not found at {git_dir}")
+            return False
+        
+        # Ensure the target directory exists (create in volume)
+        os.makedirs(os.path.dirname(model_path), exist_ok=True)
+        
+        # Get relative path from BASE_DIR for git lfs pull
+        # BASE_DIR is /app, model_path is /app/models/bertimbau-mlp-ai/bertimbau_mlp.pt
+        # Relative path: models/bertimbau-mlp-ai/bertimbau_mlp.pt
+        # But Git tracks files as app/models/... (relative to repo root)
+        # Since we copied .git/ to /app/.git/, the repo root is /app/
+        # So we need to use "app/models/..." path for git lfs pull
+        rel_path_from_base = os.path.relpath(model_path, BASE_DIR)
+        # Try both paths: the relative path and with "app/" prefix
+        # Git might track files as "app/models/..." even though repo root is /app/
+        git_paths_to_try = [
+            f"app/{rel_path_from_base}",  # app/models/bertimbau-mlp-ai/bertimbau_mlp.pt
+            rel_path_from_base,  # models/bertimbau-mlp-ai/bertimbau_mlp.pt
+        ]
+        
+        print(f"   Model path: {model_path}")
+        print(f"   Relative from BASE_DIR: {rel_path_from_base}")
+        print(f"   Trying Git paths: {git_paths_to_try}")
+        
+        # Try git lfs pull with different path formats
+        # This downloads to the volume location since volume is mounted at runtime
+        result = None
+        success = False
+        for git_path in git_paths_to_try:
+            print(f"   Trying: git lfs pull --include {git_path}")
+            result = subprocess.run(
+                ['git', 'lfs', 'pull', '--include', git_path],
+                cwd=BASE_DIR,
+                capture_output=True,
+                text=True,
+                timeout=600
+            )
+            if result.returncode == 0:
+                print(f"   ✅ Success with path: {git_path}")
+                success = True
+                break
+            else:
+                print(f"   ⚠️  Failed with path: {git_path} (exit code: {result.returncode})")
+        
+        # If specific paths failed, try pulling all LFS files
+        if not success:
+            print(f"   Trying: git lfs pull (all files)")
+            result = subprocess.run(
+                ['git', 'lfs', 'pull'],  # Try pulling all LFS files
+                cwd=BASE_DIR,
+                capture_output=True,
+                text=True,
+                timeout=600
+            )
+            if result.returncode == 0:
+                success = True
+        
+        if success and result and result.returncode == 0:
+            # Verify the file is now a binary (not a pointer)
+            if os.path.exists(model_path) and not is_lfs_pointer(model_path):
+                file_size = os.path.getsize(model_path) / (1024*1024)
+                print(f"✅ {model_name} fetched from Git LFS successfully!")
+                print(f"   File size: {file_size:.2f} MB (stored in Railway volume)")
+                return True
+            else:
+                print(f"⚠️  File still appears to be a pointer after git lfs pull")
+                if result.stdout:
+                    print(f"   Git LFS output: {result.stdout}")
+                return False
+        else:
+            error_msg = result.stderr or result.stdout or "Unknown error"
+            print(f"⚠️  Git LFS pull failed (exit code {result.returncode})")
+            print(f"   Error: {error_msg}")
+            
+            # Check if it's an authentication issue
+            if "authentication" in error_msg.lower() or "unauthorized" in error_msg.lower():
+                print(f"   💡 Tip: Railway may need Git credentials for private repos")
+                print(f"   💡 Consider using BERT_EMOTIONS_MODEL_URL and BERT_SENTIMENT_MODEL_URL env vars instead")
+            
+            return False
+    except subprocess.TimeoutExpired:
+        print(f"❌ Git LFS pull timed out after 600 seconds")
+        return False
+    except Exception as e:
+        print(f"❌ Error fetching from Git LFS: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+def download_model_if_needed(model_path, model_url, model_name):
+    """Download model if it doesn't exist and URL is provided"""
+    # First, check if it's a Git LFS pointer and try to fetch from LFS
+    if is_lfs_pointer(model_path):
+        print(f"⚠️  {model_name} is a Git LFS pointer")
+        # Try to fetch from Git LFS first
+        if download_from_git_lfs(model_path, model_name):
+            return True
+        # If LFS fetch fails and URL is provided, download from URL
+        if model_url:
+            print(f"   Git LFS fetch failed, trying URL download...")
+            os.remove(model_path)  # Remove pointer file
+    
+    # If file exists and is not a pointer, we're good
+    if os.path.exists(model_path) and not is_lfs_pointer(model_path):
+        return True
+    
+    # Download from URL if provided
+    if model_url and not os.path.exists(model_path):
+        print(f"📥 Downloading {model_name} from {model_url}...")
+        try:
+            os.makedirs(os.path.dirname(model_path), exist_ok=True)
+            response = requests.get(model_url, stream=True, timeout=300)
+            response.raise_for_status()
+            
+            total_size = int(response.headers.get('content-length', 0))
+            downloaded = 0
+            
+            with open(model_path, 'wb') as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+                        downloaded += len(chunk)
+                        if total_size > 0:
+                            percent = (downloaded / total_size) * 100
+                            print(f"\r   Progress: {percent:.1f}%", end='', flush=True)
+            
+            print(f"\n✅ {model_name} downloaded successfully!")
+            return True
+        except Exception as e:
+            print(f"❌ Error downloading {model_name}: {e}")
+            return False
+    
+    return os.path.exists(model_path) and not is_lfs_pointer(model_path)
+
+# Try to download models if they don't exist or are LFS pointers
+bert_emotions_path = os.path.join(BERT_EMOTIONS_PATH, "bertimbau_mlp.pt")
+bert_sentiment_path = os.path.join(BERT_SENTIMENT_PATH, "bertimbau_sentiment_best.pt")
+
+# Try Git LFS first, then fallback to URL if provided
+download_model_if_needed(bert_emotions_path, BERT_EMOTIONS_MODEL_URL, "BERTimbau Emoções")
+download_model_if_needed(bert_sentiment_path, BERT_SENTIMENT_MODEL_URL, "BERTimbau Sentimentos")
 
 # Labels
 EMOTION_LABELS = ["AUSENTE", "RAIVA", "TRISTEZA", "MEDO", "CONFIANÇA", "ALEGRIA", "AMOR"]
@@ -94,23 +268,44 @@ try:
     model_path = os.path.join(BERT_EMOTIONS_PATH, "bertimbau_mlp.pt")
     
     if os.path.exists(model_path):
+        # Verify file is not empty and is a valid binary file
+        file_size = os.path.getsize(model_path)
         print(f"Loading weights from {model_path}...")
-        state_dict = torch.load(model_path, map_location=DEVICE, weights_only=False)
-        bert_emotions_model.load_state_dict(state_dict)
-        bert_emotions_model.eval()
-        print("✅ BERTimbau Emoções model loaded successfully!")
-        print(f"   Using: bertimbau_mlp.pt")
+        print(f"   File size: {file_size / (1024*1024):.2f} MB")
         
-        # Test prediction to verify model is working
-        test_text = "Estou com muita raiva dessa situação!"
-        test_inputs = bert_emotions_tokenizer(test_text, return_tensors="pt", padding=True, truncation=True, max_length=512)
-        test_inputs = {k: v.to(DEVICE) for k, v in test_inputs.items()}
-        with torch.no_grad():
-            test_outputs = bert_emotions_model(input_ids=test_inputs['input_ids'], attention_mask=test_inputs['attention_mask'])
-            test_probs = test_outputs.cpu().numpy()[0]
-        test_max_idx = np.argmax(test_probs)
-        print(f"   Test prediction: '{test_text}' -> {EMOTION_LABELS[test_max_idx]} (prob: {test_probs[test_max_idx]:.4f})")
-        print(f"   All test probs: {dict(zip(EMOTION_LABELS, test_probs))}")
+        if file_size == 0:
+            raise ValueError(f"Model file is empty: {model_path}")
+        
+        # Try loading with explicit file mode
+        try:
+            state_dict = torch.load(model_path, map_location=DEVICE, weights_only=False)
+            bert_emotions_model.load_state_dict(state_dict)
+            bert_emotions_model.eval()
+            print("✅ BERTimbau Emoções model loaded successfully!")
+            print(f"   Using: bertimbau_mlp.pt")
+            
+            # Test prediction to verify model is working
+            test_text = "Estou com muita raiva dessa situação!"
+            test_inputs = bert_emotions_tokenizer(test_text, return_tensors="pt", padding=True, truncation=True, max_length=512)
+            test_inputs = {k: v.to(DEVICE) for k, v in test_inputs.items()}
+            with torch.no_grad():
+                test_outputs = bert_emotions_model(input_ids=test_inputs['input_ids'], attention_mask=test_inputs['attention_mask'])
+                test_probs = test_outputs.cpu().numpy()[0]
+            test_max_idx = np.argmax(test_probs)
+            print(f"   Test prediction: '{test_text}' -> {EMOTION_LABELS[test_max_idx]} (prob: {test_probs[test_max_idx]:.4f})")
+            print(f"   All test probs: {dict(zip(EMOTION_LABELS, test_probs))}")
+        except Exception as load_error:
+            print(f"❌ Error loading model weights: {load_error}")
+            print(f"   File exists: {os.path.exists(model_path)}")
+            print(f"   File size: {file_size} bytes")
+            # Check first few bytes to see if file is corrupted
+            try:
+                with open(model_path, 'rb') as f:
+                    first_bytes = f.read(10)
+                    print(f"   First 10 bytes (hex): {first_bytes.hex()}")
+            except:
+                pass
+            raise
     else:
         print(f"❌ Weights not found at: {model_path}")
         print(f"   Expected: {model_path}")
@@ -158,12 +353,33 @@ try:
     model_path = os.path.join(BERT_SENTIMENT_PATH, "bertimbau_sentiment_best.pt")
     
     if os.path.exists(model_path):
+        # Verify file is not empty and is a valid binary file
+        file_size = os.path.getsize(model_path)
         print(f"Loading weights from {model_path}...")
-        state_dict = torch.load(model_path, map_location=DEVICE, weights_only=False)
-        bert_sentiment_model.load_state_dict(state_dict)
-        bert_sentiment_model.eval()
-        print("✅ BERTimbau Sentimentos model loaded successfully!")
-        print(f"   Using: bertimbau_sentiment_best.pt")
+        print(f"   File size: {file_size / (1024*1024):.2f} MB")
+        
+        if file_size == 0:
+            raise ValueError(f"Model file is empty: {model_path}")
+        
+        # Try loading with explicit file mode
+        try:
+            state_dict = torch.load(model_path, map_location=DEVICE, weights_only=False)
+            bert_sentiment_model.load_state_dict(state_dict)
+            bert_sentiment_model.eval()
+            print("✅ BERTimbau Sentimentos model loaded successfully!")
+            print(f"   Using: bertimbau_sentiment_best.pt")
+        except Exception as load_error:
+            print(f"❌ Error loading model weights: {load_error}")
+            print(f"   File exists: {os.path.exists(model_path)}")
+            print(f"   File size: {file_size} bytes")
+            # Check first few bytes to see if file is corrupted
+            try:
+                with open(model_path, 'rb') as f:
+                    first_bytes = f.read(10)
+                    print(f"   First 10 bytes (hex): {first_bytes.hex()}")
+            except:
+                pass
+            raise
     else:
         print(f"❌ Weights not found at: {model_path}")
         print(f"   Expected: {model_path}")
@@ -185,9 +401,32 @@ mnb_mlb = None
 
 try:
     # Load MNB components from models directory
+    # Note: .pkl files are NOT in Git LFS, so they're copied normally during Docker build
+    # However, if Railway volume is mounted at /app/models, we need to ensure they're available
     mnb_model_path = os.path.join(MNB_MODEL_DIR, "mnb_model.pkl")
     mnb_vectorizer_path = os.path.join(MNB_MODEL_DIR, "mnb_vectorizer.pkl")
     mnb_mlb_path = os.path.join(MNB_MODEL_DIR, "mnb_mlb.pkl")
+    
+    # Check if files exist, if not, try to copy from temp location to volume
+    # (Volume overlays /app/models, so build files are hidden - we copied them to /tmp during build)
+    if not all(os.path.exists(p) for p in [mnb_model_path, mnb_vectorizer_path, mnb_mlb_path]):
+        print(f"⚠️  Some MNB .pkl files not found in volume, copying from temp location...")
+        # .pkl files were copied to /tmp/models/mnb during Docker build
+        # (because volume mount overlays /app/models, hiding build files)
+        temp_models_dir = "/tmp/models/mnb"
+        if os.path.exists(temp_models_dir):
+            print(f"   Found .pkl files in temp location, copying to volume...")
+            os.makedirs(MNB_MODEL_DIR, exist_ok=True)
+            for pkl_file in ["mnb_model.pkl", "mnb_vectorizer.pkl", "mnb_mlb.pkl"]:
+                src = os.path.join(temp_models_dir, pkl_file)
+                dst = os.path.join(MNB_MODEL_DIR, pkl_file)
+                if os.path.exists(src) and not os.path.exists(dst):
+                    shutil.copy2(src, dst)
+                    print(f"   ✅ Copied {pkl_file} to volume ({os.path.getsize(dst) / 1024:.1f} KB)")
+                elif os.path.exists(src):
+                    print(f"   ℹ️  {pkl_file} already exists in volume")
+        else:
+            print(f"   ⚠️  Temp location {temp_models_dir} not found")
     
     if os.path.exists(mnb_model_path) and os.path.exists(mnb_vectorizer_path) and os.path.exists(mnb_mlb_path):
         with open(mnb_model_path, 'rb') as f:
@@ -204,6 +443,7 @@ try:
         print(f"     - {mnb_model_path}")
         print(f"     - {mnb_vectorizer_path}")
         print(f"     - {mnb_mlb_path}")
+        print(f"   Note: .pkl files are in regular Git (not LFS), so they should be copied during build")
         mnb_model = None
         mnb_vectorizer = None
         mnb_mlb = None
