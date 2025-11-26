@@ -313,11 +313,25 @@ def download_model_if_needed(model_path, model_url, model_name):
     
     return os.path.exists(model_path) and not is_lfs_pointer(model_path)
 
+# Copy src directories to volume if they don't exist (volume overlay hides build files)
+print("Setting up model directories in volume...")
+for model_dir, temp_path in [
+    (BERT_EMOTIONS_PATH, "/tmp/models/bertimbau-mlp-ai"),
+    (BERT_SENTIMENT_PATH, "/tmp/models/bertimbau-mlp-sentiment")
+]:
+    if not os.path.exists(os.path.join(model_dir, "src")):
+        temp_src = os.path.join(temp_path, "src")
+        if os.path.exists(temp_src):
+            os.makedirs(model_dir, exist_ok=True)
+            shutil.copytree(temp_src, os.path.join(model_dir, "src"), dirs_exist_ok=True)
+            print(f"   ✅ Copied src directory to {model_dir}")
+
 # Try to download models if they don't exist or are LFS pointers
 bert_emotions_path = os.path.join(BERT_EMOTIONS_PATH, "bertimbau_mlp.pt")
 bert_sentiment_path = os.path.join(BERT_SENTIMENT_PATH, "bertimbau_sentiment_best.pt")
 
 # Try Git LFS first, then fallback to URL if provided
+print("Downloading model weights...")
 download_model_if_needed(bert_emotions_path, BERT_EMOTIONS_MODEL_URL, "BERTimbau Emoções")
 download_model_if_needed(bert_sentiment_path, BERT_SENTIMENT_MODEL_URL, "BERTimbau Sentimentos")
 
@@ -348,7 +362,7 @@ try:
     # Import BERTimbauMLP for emotions - ensure we use the correct path
     src_path = os.path.join(BERT_EMOTIONS_PATH, "src")
     if not os.path.exists(src_path):
-        raise FileNotFoundError(f"Source path not found: {src_path}")
+        raise FileNotFoundError(f"Source path not found: {src_path} (should have been copied earlier)")
     
     # Use importlib to load from specific path
     import importlib.util
@@ -433,7 +447,7 @@ try:
     # Import BERTimbauMLP for sentiment - ensure we use the correct path
     src_path = os.path.join(BERT_SENTIMENT_PATH, "src")
     if not os.path.exists(src_path):
-        raise FileNotFoundError(f"Source path not found: {src_path}")
+        raise FileNotFoundError(f"Source path not found: {src_path} (should have been copied earlier)")
     
     # Use importlib to load from specific path
     import importlib.util
@@ -680,14 +694,24 @@ def serve_frontend(path):
 # ========== API ENDPOINTS ==========
 @app.route('/api/health', methods=['GET'])
 def health_check():
+    """Health check endpoint - Railway uses this to verify deployment is ready"""
+    models_loaded = {
+        "bert_emotions": bert_emotions_model is not None,
+        "bert_sentiment": bert_sentiment_model is not None,
+        "mnb": mnb_model is not None
+    }
+    
+    # Check if all critical models are loaded
+    all_loaded = all(models_loaded.values())
+    
+    status_code = 200 if all_loaded else 503  # 503 = Service Unavailable
+    status = "ready" if all_loaded else "loading"
+    
     return jsonify({
-        "status": "healthy",
-        "models": {
-            "bert_emotions": bert_emotions_model is not None,
-            "bert_sentiment": bert_sentiment_model is not None,
-            "mnb": mnb_model is not None
-        }
-    })
+        "status": status,
+        "models": models_loaded,
+        "ready": all_loaded
+    }), status_code
 
 @app.route('/api/predict_csv', methods=['POST'])
 def predict_csv():

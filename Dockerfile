@@ -20,11 +20,19 @@ RUN pip install --no-cache-dir --upgrade pip && \
 # Copy the rest of the application
 COPY app/ .
 
-# Copy .pkl files to a temp location (they're not in Git LFS, so they're in regular Git)
+# Copy .pkl files and src directories to temp location
 # We'll copy them to the volume at runtime since volumes overlay /app/models
 RUN mkdir -p /tmp/models/mnb && \
+    mkdir -p /tmp/models/bertimbau-mlp-ai && \
+    mkdir -p /tmp/models/bertimbau-mlp-sentiment && \
     if [ -d "models/mnb" ]; then \
         cp -r models/mnb/* /tmp/models/mnb/ 2>/dev/null || true; \
+    fi && \
+    if [ -d "models/bertimbau-mlp-ai/src" ]; then \
+        cp -r models/bertimbau-mlp-ai/src /tmp/models/bertimbau-mlp-ai/ 2>/dev/null || true; \
+    fi && \
+    if [ -d "models/bertimbau-mlp-sentiment/src" ]; then \
+        cp -r models/bertimbau-mlp-sentiment/src /tmp/models/bertimbau-mlp-sentiment/ 2>/dev/null || true; \
     fi
 
 
