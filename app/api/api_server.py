@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 import sys
 import os
@@ -26,7 +26,13 @@ CORS(app)
 print("Starting Emotion and Sentiment Classification API...")
 
 # Use absolute path to avoid issues with relative paths
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# Handle both local development and Vercel deployment
+if os.path.exists('/var/task'):
+    # Vercel serverless environment
+    BASE_DIR = '/var/task'
+else:
+    # Local development
+    BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # Paths to model directories
@@ -303,19 +309,42 @@ def predict_mnb(text):
     # For MNB, emotion is AUSENTE and feeling is the sentiment
     return "AUSENTE", feeling, float(max_prob)
 
+# ========== FRONTEND ROUTES ==========
+# Serve frontend static files
+FRONTEND_DIR = os.path.join(BASE_DIR, "frontend")
+
+@app.route('/')
+def serve_index():
+    """Serve index.html"""
+    return send_from_directory(FRONTEND_DIR, 'index.html')
+
+@app.route('/<path:path>')
+def serve_frontend(path):
+    """Serve frontend static files (CSS, JS, images, etc.)"""
+    # Don't serve API routes as files
+    if path.startswith('api/'):
+        return None
+    
+    # Try to serve static file
+    try:
+        return send_from_directory(FRONTEND_DIR, path)
+    except:
+        # If file not found, serve index.html (for client-side routing)
+        return send_from_directory(FRONTEND_DIR, 'index.html')
+
 # ========== API ENDPOINTS ==========
-@app.route('/health', methods=['GET'])
+@app.route('/api/health', methods=['GET'])
 def health_check():
     return jsonify({
         "status": "healthy",
         "models": {
-            "bertimbau_emotions": bert_emotions_model is not None,
-            "bertimbau_sentiment": bert_sentiment_model is not None,
-            "mnb_sentiment": mnb_model is not None
+            "bert_emotions": bert_emotions_model is not None,
+            "bert_sentiment": bert_sentiment_model is not None,
+            "mnb": mnb_model is not None
         }
     })
 
-@app.route('/predict_csv', methods=['POST'])
+@app.route('/api/predict_csv', methods=['POST'])
 def predict_csv():
     try:
         print("Received CSV prediction request...")
@@ -514,7 +543,7 @@ def get_default_metrics():
         }
     }
 
-@app.route('/metrics', methods=['GET'])
+@app.route('/api/metrics', methods=['GET'])
 def get_metrics():
     """Get performance metrics for the selected model
     
@@ -540,7 +569,7 @@ def get_metrics():
     
     return jsonify(metrics)
 
-@app.route('/predict', methods=['POST'])
+@app.route('/api/predict', methods=['POST'])
 def predict():
     try:
         data = request.get_json()
@@ -583,8 +612,11 @@ def predict():
         return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':
+    # Get port from environment variable (Railway, Render, etc. provide this)
+    port = int(os.getenv('PORT', 5000))
+    
     print("\n" + "="*60)
-    print("API server starting on http://localhost:5000")
+    print(f"API server starting on http://0.0.0.0:{port}")
     print("="*60)
     print("\nAvailable models:")
     print(f"  - bert-emotions: {'✅' if bert_emotions_model else '❌'}")
@@ -592,9 +624,12 @@ if __name__ == '__main__':
     print(f"  - mnb: {'✅' if mnb_model else '❌'}")
     print("\n" + "="*60)
     
+    # Disable debug mode in production (set by platforms)
+    debug_mode = os.getenv('FLASK_DEBUG', 'False').lower() == 'true'
+    
     try:
-        app.run(host='0.0.0.0', port=5000, debug=True)
+        app.run(host='0.0.0.0', port=port, debug=debug_mode)
     except Exception as e:
-        print(f"Error starting on port 5000: {e}")
-        print("Trying port 5001...")
-        app.run(host='0.0.0.0', port=5001, debug=True)
+        print(f"Error starting on port {port}: {e}")
+        # Fallback to default port
+        app.run(host='0.0.0.0', port=5000, debug=debug_mode)

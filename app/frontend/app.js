@@ -49,7 +49,9 @@ async function loadModelMetrics() {
   document.getElementById('metric-model').textContent = modelNameMap[selectedModel] || 'Modelo';
   
   try {
-    const response = await fetch(`http://localhost:5000/metrics?model=${selectedModel}`);
+    // Use relative path for API - works both locally and on Railway
+    const apiBase = window.location.origin;
+    const response = await fetch(`${apiBase}/api/metrics?model=${selectedModel}`);
     if (!response.ok) {
       throw new Error('Failed to load metrics');
     }
@@ -242,7 +244,9 @@ classifyBtn.addEventListener('click', async () => {
 
 // API calling functions
 async function callSingleModelAPI(file, modelType = 'bert-emotions') {
-  const url = `http://localhost:5000/predict_csv?model=${modelType}`;
+  // Use relative path for API - works both locally and on Railway
+  const apiBase = window.location.origin;
+  const url = `${apiBase}/api/predict_csv?model=${modelType}`;
   const formData = new FormData();
   formData.append('file', file);
 
