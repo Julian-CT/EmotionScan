@@ -95,7 +95,7 @@ try:
     
     if os.path.exists(model_path):
         print(f"Loading weights from {model_path}...")
-        state_dict = torch.load(model_path, map_location=DEVICE)
+        state_dict = torch.load(model_path, map_location=DEVICE, weights_only=False)
         bert_emotions_model.load_state_dict(state_dict)
         bert_emotions_model.eval()
         print("✅ BERTimbau Emoções model loaded successfully!")
@@ -159,7 +159,7 @@ try:
     
     if os.path.exists(model_path):
         print(f"Loading weights from {model_path}...")
-        state_dict = torch.load(model_path, map_location=DEVICE)
+        state_dict = torch.load(model_path, map_location=DEVICE, weights_only=False)
         bert_sentiment_model.load_state_dict(state_dict)
         bert_sentiment_model.eval()
         print("✅ BERTimbau Sentimentos model loaded successfully!")
