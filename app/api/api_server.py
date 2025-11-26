@@ -60,22 +60,68 @@ def is_lfs_pointer(filepath):
     except:
         return False
 
+def convert_google_drive_link(share_url):
+    """Convert Google Drive share link to direct download link"""
+    # Google Drive share links come in different formats:
+    # Format 1: https://drive.google.com/file/d/FILE_ID/view?usp=sharing
+    # Format 2: https://drive.google.com/open?id=FILE_ID
+    # Format 3: https://drive.google.com/uc?id=FILE_ID (already direct)
+    
+    import re
+    
+    # Extract file ID from various Google Drive URL formats
+    file_id = None
+    
+    # Try to extract from /d/FILE_ID/ pattern
+    match = re.search(r'/d/([a-zA-Z0-9_-]+)', share_url)
+    if match:
+        file_id = match.group(1)
+    else:
+        # Try to extract from ?id=FILE_ID pattern
+        match = re.search(r'[?&]id=([a-zA-Z0-9_-]+)', share_url)
+        if match:
+            file_id = match.group(1)
+    
+    if file_id:
+        # Convert to direct download URL
+        # For large files, Google Drive may show a virus scan warning
+        # Use uc?export=download&id= format, and handle virus scan confirmation
+        direct_url = f"https://drive.google.com/uc?export=download&id={file_id}"
+        return direct_url
+    else:
+        # If we can't extract ID, return original URL (might already be direct)
+        print(f"   ⚠️  Could not extract file ID from Google Drive URL, using as-is")
+        return share_url
+
 def download_from_git_lfs(model_path, model_name):
     """Try to download model from Git LFS using git lfs pull and store in volume"""
     if not is_lfs_pointer(model_path):
         return False  # File is already a binary, not a pointer
     
-    print(f"📥 Detected Git LFS pointer for {model_name}, trying to fetch from Git LFS...")
+    print(f"📥 Detected Git LFS pointer for {model_name}")
+    print(f"   Note: Railway doesn't include .git in Docker build, so Git LFS may not work")
+    print(f"   Will try Git LFS, but URL fallback is recommended for Railway")
     print(f"   Target location: {model_path}")
-    print(f"   This will be stored in Railway volume at /app/models")
     try:
         import subprocess
         
         # Check if .git directory exists
+        # Railway doesn't include .git in Docker build context, so it won't be available
+        # We'll try git lfs pull anyway - it might work if Railway provides Git access
         git_dir = os.path.join(BASE_DIR, '.git')
+        work_dir = BASE_DIR
+        
         if not os.path.exists(git_dir):
-            print(f"⚠️  .git directory not found at {git_dir}")
-            return False
+            # Try parent directory (in case repo root is different)
+            parent_git = os.path.join(os.path.dirname(BASE_DIR), '.git')
+            if os.path.exists(parent_git):
+                git_dir = parent_git
+                work_dir = os.path.dirname(BASE_DIR)
+                print(f"   Found .git in parent directory: {git_dir}")
+            else:
+                print(f"⚠️  .git directory not found - Railway doesn't include it in Docker build")
+                print(f"   Will try git lfs pull anyway (may fail, will use URL fallback if needed)")
+                work_dir = BASE_DIR  # Try anyway
         
         # Ensure the target directory exists (create in volume)
         os.makedirs(os.path.dirname(model_path), exist_ok=True)
@@ -100,13 +146,23 @@ def download_from_git_lfs(model_path, model_name):
         
         # Try git lfs pull with different path formats
         # This downloads to the volume location since volume is mounted at runtime
+        # Note: On Railway, we might not have .git directory, but git lfs might still work
         result = None
         success = False
+        
+        # Determine working directory for git commands
+        work_dir = BASE_DIR
+        if os.path.exists(git_dir):
+            work_dir = BASE_DIR
+        else:
+            # Try to find where git is available
+            work_dir = os.getcwd()
+        
         for git_path in git_paths_to_try:
             print(f"   Trying: git lfs pull --include {git_path}")
             result = subprocess.run(
                 ['git', 'lfs', 'pull', '--include', git_path],
-                cwd=BASE_DIR,
+                cwd=work_dir,
                 capture_output=True,
                 text=True,
                 timeout=600
@@ -123,7 +179,7 @@ def download_from_git_lfs(model_path, model_name):
             print(f"   Trying: git lfs pull (all files)")
             result = subprocess.run(
                 ['git', 'lfs', 'pull'],  # Try pulling all LFS files
-                cwd=BASE_DIR,
+                cwd=work_dir,
                 capture_output=True,
                 text=True,
                 timeout=600
@@ -165,16 +221,22 @@ def download_from_git_lfs(model_path, model_name):
 
 def download_model_if_needed(model_path, model_url, model_name):
     """Download model if it doesn't exist and URL is provided"""
-    # First, check if it's a Git LFS pointer and try to fetch from LFS
+    # First, check if it's a Git LFS pointer
     if is_lfs_pointer(model_path):
         print(f"⚠️  {model_name} is a Git LFS pointer")
-        # Try to fetch from Git LFS first
-        if download_from_git_lfs(model_path, model_name):
-            return True
-        # If LFS fetch fails and URL is provided, download from URL
+        
+        # On Railway, Git LFS usually won't work (no .git directory)
+        # So prioritize URL download if available
         if model_url:
-            print(f"   Git LFS fetch failed, trying URL download...")
+            print(f"   Using URL download (recommended for Railway)...")
             os.remove(model_path)  # Remove pointer file
+        else:
+            # Try Git LFS as fallback (might work in some environments)
+            print(f"   No URL provided, trying Git LFS...")
+            if download_from_git_lfs(model_path, model_name):
+                return True
+            print(f"   ⚠️  Git LFS failed. Please set {model_name.upper().replace(' ', '_')}_MODEL_URL environment variable")
+            return False
     
     # If file exists and is not a pointer, we're good
     if os.path.exists(model_path) and not is_lfs_pointer(model_path):
@@ -185,8 +247,49 @@ def download_model_if_needed(model_path, model_url, model_name):
         print(f"📥 Downloading {model_name} from {model_url}...")
         try:
             os.makedirs(os.path.dirname(model_path), exist_ok=True)
-            response = requests.get(model_url, stream=True, timeout=300)
+            
+            # Convert Google Drive share link to direct download link if needed
+            download_url = model_url
+            if "drive.google.com" in model_url:
+                print(f"   Detected Google Drive link, converting to direct download...")
+                download_url = convert_google_drive_link(model_url)
+                print(f"   Using direct download URL")
+            
+            # For Google Drive, handle virus scan warning for large files
+            session = requests.Session()
+            response = session.get(download_url, stream=True, timeout=600, allow_redirects=True)
+            
+            # Check if Google Drive is showing a virus scan warning page
+            # Large files (>100MB) trigger a warning that needs confirmation
+            if 'virus scan warning' in response.text.lower() or 'download anyway' in response.text.lower():
+                print(f"   ⚠️  Google Drive virus scan warning detected, attempting to bypass...")
+                # Extract the confirmation link from the warning page
+                import re
+                confirm_match = re.search(r'href="(/uc\?export=download[^"]*)"', response.text)
+                if confirm_match:
+                    confirm_url = "https://drive.google.com" + confirm_match.group(1)
+                    print(f"   Using confirmation link...")
+                    response = session.get(confirm_url, stream=True, timeout=600, allow_redirects=True)
+                else:
+                    # Try alternative method: use confirm parameter
+                    if 'id=' in download_url:
+                        file_id = re.search(r'id=([^&]+)', download_url).group(1)
+                        confirm_url = f"https://drive.google.com/uc?export=download&confirm=t&id={file_id}"
+                        print(f"   Trying alternative download method...")
+                        response = session.get(confirm_url, stream=True, timeout=600, allow_redirects=True)
+            
             response.raise_for_status()
+            
+            # Check if we got HTML instead of binary (still showing warning page)
+            content_type = response.headers.get('content-type', '').lower()
+            if 'text/html' in content_type and len(response.content) < 10000:
+                # Likely still a warning page, try one more time with confirm=t
+                if 'drive.google.com' in download_url and 'id=' in download_url:
+                    file_id = re.search(r'id=([^&]+)', download_url).group(1)
+                    final_url = f"https://drive.google.com/uc?export=download&confirm=t&id={file_id}"
+                    print(f"   Retrying with confirmation parameter...")
+                    response = session.get(final_url, stream=True, timeout=600, allow_redirects=True)
+                    response.raise_for_status()
             
             total_size = int(response.headers.get('content-length', 0))
             downloaded = 0
@@ -198,7 +301,9 @@ def download_model_if_needed(model_path, model_url, model_name):
                         downloaded += len(chunk)
                         if total_size > 0:
                             percent = (downloaded / total_size) * 100
-                            print(f"\r   Progress: {percent:.1f}%", end='', flush=True)
+                            print(f"\r   Progress: {percent:.1f}% ({downloaded / (1024*1024):.1f} MB)", end='', flush=True)
+                        else:
+                            print(f"\r   Progress: {downloaded / (1024*1024):.1f} MB downloaded", end='', flush=True)
             
             print(f"\n✅ {model_name} downloaded successfully!")
             return True
